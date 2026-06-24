@@ -147,8 +147,17 @@ jobs:
           VERSION="${TAG_NAME#v}"
           DEB_FILE="$(ls -1 dist/*.deb | head -n1)"
           APPIMAGE_FILE="$(ls -1 dist/*.AppImage | head -n1)"
-          mv -f "${DEB_FILE}" "dist/open-design-${VERSION}-linux-amd64.deb"
-          mv -f "${APPIMAGE_FILE}" "dist/open-design-${VERSION}-linux-amd64.AppImage"
+          # electron-builder's deb artifactName already produces the canonical
+          # <name>-<version>-linux-amd64.deb name, so only rename if it differs.
+          if [[ "${DEB_FILE}" != "dist/open-design-${VERSION}-linux-amd64.deb" ]]; then
+            mv -f "${DEB_FILE}" "dist/open-design-${VERSION}-linux-amd64.deb"
+          fi
+          # AppImage ships as ...-x86_64.AppImage; normalize to amd64 for APT
+          # parity and to match the install instructions.
+          if [[ "${APPIMAGE_FILE}" != "dist/open-design-${VERSION}-linux-amd64.AppImage" ]]; then
+            mv -f "${APPIMAGE_FILE}" "dist/open-design-${VERSION}-linux-amd64.AppImage"
+          fi
+          ls -lh dist/*.deb dist/*.AppImage
 
       - name: Verify packaged wrapper + resources
         run: |
