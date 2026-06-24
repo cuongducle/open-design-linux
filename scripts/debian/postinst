@@ -1,0 +1,61 @@
+#!/bin/bash
+set -e
+
+# Update desktop database (idempotent)
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications || true
+fi
+
+# Update icon cache (idempotent)
+gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true
+
+# Resolve the install dir. electron-builder installs under /opt/<productName>
+# which for Open Design is "/opt/Open Design" (with a space); the executable
+# name is "open-design". Prefer the real install dir if present.
+INSTALL_PREFIX=""
+for candidate in "/opt/Open Design" "/opt/open-design" /usr/lib/open-design /usr/lib/"Open Design"; do
+    if [ -d "$candidate" ]; then
+        INSTALL_PREFIX="$candidate"
+        break
+    fi
+done
+
+# Set chrome-sandbox permissions so the Electron sandbox works.
+if [ -n "$INSTALL_PREFIX" ]; then
+    sandbox="$INSTALL_PREFIX/chrome-sandbox"
+    if [ -f "$sandbox" ]; then
+        chown root:root "$sandbox"
+        chmod 4755 "$sandbox"
+    fi
+fi
+
+# Generate AppArmor profile if apparmor_parser is available. Open Design spawns
+# child processes (daemon, web sidecar, agent CLIs) so the profile must allow
+# userns + broad config writes under ~/.config/Open Design.
+if command -v apparmor_parser >/dev/null 2>&1 && [ -n "$INSTALL_PREFIX" ]; then
+    PROFILE_PATH="/etc/apparmor.d/open-design"
+    BIN_PATH="$INSTALL_PREFIX/open-design.bin"
+
+    if [ ! -f "$PROFILE_PATH" ]; then
+        printf '%s\n' \
+            "#include <tunables/global>" \
+            "" \
+            "${BIN_PATH} {" \
+            "  #include <abstractions/base>" \
+            "  userns," \
+            "" \
+            "  $INSTALL_PREFIX/** r," \
+            "  $INSTALL_PREFIX/** rwlix," \
+            "" \
+            "  owner @{HOME}/.config/Open Design/** rwlk," \
+            "  owner @{HOME}/.config/Open Design* rw," \
+            "" \
+            "  /usr/share/** r," \
+            "  /etc/** r," \
+            "" \
+            "  network," \
+            "}" > "$PROFILE_PATH"
+    fi
+
+    apparmor_parser -r "$PROFILE_PATH" || true
+fi

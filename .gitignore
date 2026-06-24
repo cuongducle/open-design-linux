@@ -1,0 +1,21 @@
+# Generated / large artifacts
+*.dmg
+app_asar/
+app_resources/
+work_dmg/
+work_version_check/
+build_native/
+build_native_opt/
+node_modules/
+tools/
+dist/
+apt-public/
+
+# npm
+package-lock.json
+npm-debug.log*
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

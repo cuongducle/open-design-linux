@@ -1,0 +1,66 @@
+appId: ai.open-design.desktop.linux
+productName: Open Design
+directories:
+  # The electron app dir IS the upstream Contents/Resources/app/ directory.
+  # Its main.cjs + prebundled/ + node_modules (rebuilt for Linux) ship under
+  # resources/app/. Everything else (open-design resource root, the Next.js
+  # standalone server, the packaged config) must land directly in resources/
+  # because Open Design resolves them via process.resourcesPath, so they go in
+  # extraResources.
+  app: app_asar/app
+  output: dist
+asar: false
+npmRebuild: false
+afterPack: build/after-pack.js
+files:
+  - "**/*"
+extraResources:
+  # extraResources "from" paths resolve relative to the project root (cwd), and
+  # "to" paths resolve under resources/. The macOS bundle layout puts these at
+  # Contents/Resources/{open-design,open-design-web-standalone,open-design-config.json},
+  # so on Linux we mirror that at resources/{open-design,...}.
+  - from: app_asar/open-design
+    to: open-design
+    filter: ["**/*"]
+  - from: app_asar/open-design-web-standalone
+    to: open-design-web-standalone
+    filter: ["**/*"]
+  - from: app_asar/open-design-config.json
+    to: open-design-config.json
+  - from: app_asar/icon.icns
+    to: icon.icns
+linux:
+  icon: assets/icons/linux
+  category: Graphics
+  maintainer: Open Design Linux Maintainers <open-design-linux-maintainers@users.noreply.github.com
+  executableName: open-design
+  artifactName: open-design-${version}-linux-${arch}.${ext}
+  desktop:
+    Name: Open Design
+    Comment: Open Design Desktop for Linux
+    Categories: Graphics;Development;Utility;
+    StartupWMClass: Open Design
+    MimeType: x-scheme-handler/od;
+deb:
+  afterInstall: scripts/debian/postinst
+  afterRemove: scripts/debian/postrm
+  depends:
+    - "libgtk-3-0"
+    - "libnotify4"
+    - "libnss3"
+    - "libxss1"
+    - "libxtst6"
+    - "libasound2"
+    - "libxshmfence1"
+  recommends:
+    - "libappindicator3-1"
+  priority: optional
+  packageCategory: graphics
+extraMetadata:
+  name: open-design
+  productName: Open Design
+  homepage: https://github.com/cuongducle/open-design-linux
+  author:
+    name: Open Design Linux Maintainers
+    email: open-design-linux-maintainers@users.noreply.github.com
+    url: https://github.com/cuongducle/open-design-linux

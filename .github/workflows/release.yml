@@ -1,0 +1,238 @@
+name: Build Release (DEB + AppImage + APT Repo)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to build and publish (e.g. v0.11.0)"
+        required: true
+        type: string
+      dmg_url:
+        description: "Optional explicit upstream DMG URL (use when the release is unlisted)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    env:
+      # Upstream Open Design release source. The x64 DMG is the build input.
+      UPSTREAM_REPO: nexu-io/open-design
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package.json
+
+      - name: Cache electron-builder toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-ebuilder-x64-${{ hashFiles('package.json', 'electron-builder.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-ebuilder-x64-
+
+      - name: Install APT tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y 7zip dmg2img dpkg-dev libfuse2 xvfb
+
+      - name: Install npm dependencies
+        run: npm install --include=dev
+
+      - name: Resolve upstream Open Design DMG
+        id: dmg
+        run: |
+          set -euo pipefail
+          # An explicit dmg_url input wins (used when the target release is
+          # unlisted upstream, e.g. 0.11.0). Otherwise autodetect the latest
+          # listed open-design-v* release's mac-x64 DMG via the releases API.
+          ASSET_URL="${{ github.event.inputs.dmg_url }}"
+          if [[ -z "${ASSET_URL}" ]]; then
+            ASSET_URL="$(
+              curl -fsSL \
+                -H 'Accept: application/vnd.github+json' \
+                "https://api.github.com/repos/${UPSTREAM_REPO}/releases?per_page=100" \
+              | jq -r '
+                  [.[] | select(.tag_name | startswith("open-design-v"))]
+                  | sort_by(.tag_name) | reverse | .[0]
+                  | .assets[] | select(.name | test("mac-x64\\.dmg$")) | .browser_download_url'
+            )"
+          fi
+          if [[ -z "${ASSET_URL}" || "${ASSET_URL}" == "null" ]]; then
+            echo "Could not resolve a mac-x64 DMG asset from ${UPSTREAM_REPO} releases." >&2
+            exit 1
+          fi
+          echo "url=${ASSET_URL}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved upstream DMG: ${ASSET_URL}"
+
+      - name: Download Open Design DMG
+        run: curl -fL "${{ steps.dmg.outputs.url }}" -o open-design.dmg
+
+      - name: Setup app payload for packaging
+        run: NATIVE_ARCH=x64 SKIP_APP_INSTALL=1 bash scripts/setup.sh ./open-design.dmg
+
+      - name: Verify native module is Linux ELF
+        run: |
+          set -euo pipefail
+          NODE_BIN="app_asar/app/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+          test -f "${NODE_BIN}"
+          file "${NODE_BIN}"
+          file "${NODE_BIN}" | grep -E "ELF"
+
+      - name: Build DEB and AppImage
+        run: |
+          npx electron-builder \
+            --config electron-builder.yml \
+            --publish never \
+            --linux deb AppImage \
+            --x64
+
+      - name: Normalize artifact names
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          DEB_FILE="$(ls -1 dist/*.deb | head -n1)"
+          APPIMAGE_FILE="$(ls -1 dist/*.AppImage | head -n1)"
+          mv -f "${DEB_FILE}" "dist/open-design-${VERSION}-linux-amd64.deb"
+          mv -f "${APPIMAGE_FILE}" "dist/open-design-${VERSION}-linux-amd64.AppImage"
+
+      - name: Verify packaged wrapper + resources
+        run: |
+          set -euo pipefail
+          APP_OUT_DIR="dist/linux-unpacked"
+          test -x "${APP_OUT_DIR}/open-design"
+          test -x "${APP_OUT_DIR}/open-design.bin"
+          head -n 1 "${APP_OUT_DIR}/open-design" | grep -F "#!/usr/bin/env bash"
+          test -d "${APP_OUT_DIR}/resources/app"
+          test -d "${APP_OUT_DIR}/resources/open-design-web-standalone"
+          test -f "${APP_OUT_DIR}/resources/open-design-config.json"
+          NODE_BIN="${APP_OUT_DIR}/resources/app/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+          file "${NODE_BIN}"
+          file "${NODE_BIN}" | grep -E "ELF"
+
+      - name: Generate flat APT Packages index for GitHub Releases
+        run: |
+          set -euo pipefail
+          # Flat layout: every asset sits at releases/latest/download/ so APT can
+          # consume it with `deb [trusted=yes] .../releases/latest/download/ ./`
+          mkdir -p dist/apt-flat
+          cp dist/*.deb dist/apt-flat/
+          FLAT_REPO=1 bash scripts/build-apt-repo.sh dist/apt-flat
+          cp dist/apt-flat/Packages dist/Packages
+          cp dist/apt-flat/Packages.gz dist/Packages.gz
+          cp dist/apt-flat/Release dist/Release
+          cp dist/apt-flat/Translation-en.gz dist/Translation-en.gz
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/Packages
+            dist/Packages.gz
+            dist/Release
+            dist/Translation-en.gz
+
+      - name: Build gh-pages site
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          REPO_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          RELEASES_REPO_URL="https://github.com/${{ github.repository }}/releases/latest/download"
+          mkdir -p apt-public
+
+          bash scripts/generate-apt-install-script.sh "${{ github.repository_owner }}" "${{ github.event.repository.name }}" apt-public
+
+          cat > apt-public/index.html <<EOF
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Install Open Design on Linux | APT Repository</title>
+            <meta name="description" content="Install Open Design on Ubuntu and Debian via APT repository. Native .deb and AppImage packages with Wayland support and one-line install." />
+            <meta name="keywords" content="Open Design, Linux, Ubuntu, Debian, APT, install, deb, AppImage, Wayland, design tool" />
+            <link rel="canonical" href="${REPO_URL}/" />
+            <meta property="og:title" content="Install Open Design on Linux" />
+            <meta property="og:description" content="Unofficial native .deb and AppImage packages for Open Design on Ubuntu, Debian, and any Linux distro." />
+            <meta property="og:url" content="${REPO_URL}/" />
+            <meta property="og:type" content="website" />
+            <meta property="og:site_name" content="Open Design for Linux" />
+            <style>body{font-family:-apple-system,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;line-height:1.6;color:#333}h1{border-bottom:2px solid #6366f1;padding-bottom:.5rem}a{color:#6366f1}pre{background:#f6f8fa;padding:1rem;border-radius:6px;overflow-x:auto}code{font-family:monospace;font-size:.9em}</style>
+          </head>
+          <body>
+            <h1>Open Design for Linux</h1>
+            <p>Unofficial native Linux packaging for <a href="https://github.com/${{ github.repository }}">Open Design</a>. Install on Ubuntu, Debian, or any Linux distribution.</p>
+            <p><strong>Quick install:</strong></p>
+            <pre><code>curl -fsSL ${REPO_URL}/install.sh | sudo bash</code></pre>
+            <p><strong>Or add the APT repository:</strong></p>
+            <pre><code>echo "deb [trusted=yes] ${RELEASES_REPO_URL}/ ./" | sudo tee /etc/apt/sources.list.d/open-design.list
+          sudo apt update
+          sudo apt install open-design</code></pre>
+            <p style="margin-top:1rem"><strong>Note:</strong> This is an unofficial project. See the <a href="https://github.com/${{ github.repository }}">GitHub repository</a> for source code, AppImage downloads, and documentation.</p>
+          </body>
+          </html>
+          EOF
+
+          cat > apt-public/robots.txt <<ROBOTSEOF
+          User-agent: *
+          Allow: /
+          Sitemap: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/sitemap.xml
+          ROBOTSEOF
+
+          cat > apt-public/sitemap.xml <<SITEMAPEOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url>
+              <loc>https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/</loc>
+              <lastmod>$(date -u +%Y-%m-%d)</lastmod>
+              <changefreq>weekly</changefreq>
+              <priority>1.0</priority>
+            </url>
+            <url>
+              <loc>https://github.com/${{ github.repository }}</loc>
+              <lastmod>$(date -u +%Y-%m-%d)</lastmod>
+              <changefreq>weekly</changefreq>
+              <priority>0.9</priority>
+            </url>
+            <url>
+              <loc>https://github.com/${{ github.repository }}/releases/latest</loc>
+              <lastmod>$(date -u +%Y-%m-%d)</lastmod>
+              <changefreq>weekly</changefreq>
+              <priority>0.8</priority>
+            </url>
+          </urlset>
+          SITEMAPEOF
+
+      - name: Publish site to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./apt-public

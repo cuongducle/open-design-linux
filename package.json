@@ -1,0 +1,23 @@
+{
+  "name": "open-design-linux",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Unofficial Open Design Linux packaging (DEB + AppImage) built from the upstream macOS DMG",
+  "scripts": {
+    "create-app": "bash scripts/setup.sh",
+    "setup": "bash scripts/setup.sh",
+    "build:deb": "bash scripts/build-packages.sh deb",
+    "build:appimage": "bash scripts/build-packages.sh appimage",
+    "build:linux": "bash scripts/build-packages.sh all",
+    "build:apt-repo": "bash scripts/build-apt-repo.sh"
+  },
+  "devDependencies": {
+    "7zip-bin": "^5.2.0",
+    "electron": "41.3.0",
+    "electron-builder": "^24.13.3"
+  },
+  "author": {
+    "name": "Open Design Linux Maintainers",
+    "email": "open-design-linux-maintainers@users.noreply.github.com"
+  }
+}

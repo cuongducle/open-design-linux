@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+# Unload AppArmor profile if apparmor_parser is available
+if command -v apparmor_parser >/dev/null 2>&1; then
+    apparmor_parser -R /etc/apparmor.d/open-design 2>/dev/null || true
+fi
+
+# On purge only: remove the profile file
+if [ "$1" = "purge" ]; then
+    rm -f /etc/apparmor.d/open-design
+fi
+
+# Update desktop database (idempotent)
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications || true
+fi

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ai.open-design.desktop</id>
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>LicenseRef-Proprietary</project_license>
+  <name>Open Design</name>
+  <summary>Open Design for Linux</summary>
+  <description>
+    <p>Unofficial Linux packaging of Open Design, an AI-native design tool.</p>
+    <p>This package is built from the upstream macOS DMG and rebuilt for Linux: the Electron runtime is replaced with the matching Linux build and the native better-sqlite3 module is compiled from source for the target Electron ABI.</p>
+  </description>
+  <url type="homepage">https://github.com/cuongducle/open-design-linux</url>
+  <url type="bugtracker">https://github.com/cuongducle/open-design-linux/issues</url>
+  <launchable type="desktop-id">open-design.desktop</launchable>
+  <provides>
+    <binary>open-design</binary>
+  </provides>
+  <supports>
+    <id>org.freedesktop.Platform/x86_64</id>
+  </supports>
+  <content_rating type="oars-1.1" intensity="mild" />
+  <releases>
+    <release version="0.1.0" date="2026-06-24">
+      <description>
+        <p>Initial unofficial Linux packaging of Open Design 0.11.0.</p>
+      </description>
+    </release>
+  </releases>
+</component>

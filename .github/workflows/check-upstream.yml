@@ -1,0 +1,166 @@
+name: Check Upstream Open Design Version
+
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-tag:
+    runs-on: ubuntu-latest
+
+    env:
+      UPSTREAM_REPO: nexu-io/open-design
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package.json
+
+      - name: Install DMG tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y 7zip dmg2img jq
+
+      - name: Install dependencies
+        run: npm install --include=dev
+
+      - name: Determine latest local tag
+        id: latest_tag
+        run: |
+          TAG="$(git tag -l 'v*' | sort -V | tail -n 1 || true)"
+          TAG="${TAG#v}"
+          echo "version=${TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve latest upstream DMG asset
+        id: upstream
+        run: |
+          set -euo pipefail
+          # Find the latest open-design-vX.Y.Z release and its mac-x64 DMG.
+          RESPONSE="$(curl -fsSL \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${UPSTREAM_REPO}/releases")"
+          LATEST_TAG="$(printf '%s' "${RESPONSE}" | jq -r '
+              [.[] | select(.tag_name | startswith("open-design-v"))]
+              | sort_by(.tag_name) | reverse | .[0].tag_name')"
+          if [[ -z "${LATEST_TAG}" || "${LATEST_TAG}" == "null" ]]; then
+            echo "No open-design-v* release found upstream." >&2
+            exit 1
+          fi
+          ASSET_URL="$(printf '%s' "${RESPONSE}" | jq -r --arg t "${LATEST_TAG}" '
+              [.[] | select(.tag_name == $t)][0]
+              | .assets[] | select(.name | test("mac-x64\\.dmg$")) | .browser_download_url')"
+          if [[ -z "${ASSET_URL}" || "${ASSET_URL}" == "null" ]]; then
+            echo "No mac-x64 DMG asset in ${LATEST_TAG}." >&2
+            exit 1
+          fi
+          echo "asset_url=${ASSET_URL}" >> "${GITHUB_OUTPUT}"
+          echo "Latest upstream release: ${LATEST_TAG}"
+          echo "Asset: ${ASSET_URL}"
+
+      - name: Check stored asset URL
+        id: changed
+        run: |
+          set -euo pipefail
+          STORED=""
+          [[ -f upstream-asset-url.txt ]] && STORED="$(tr -d '\r\n' < upstream-asset-url.txt)"
+          CURRENT="${{ steps.upstream.outputs.asset_url }}"
+          echo "url=${CURRENT}" >> "${GITHUB_OUTPUT}"
+          if [[ "${CURRENT}" == "${STORED}" ]]; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "Upstream DMG asset URL unchanged."
+          else
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+            echo "Upstream DMG changed: ${STORED} -> ${CURRENT}"
+          fi
+
+      - name: Download Open Design DMG
+        if: steps.changed.outputs.changed == 'true'
+        run: curl -fL "${{ steps.upstream.outputs.url }}" -o open-design.dmg
+
+      - name: Read upstream Open Design version
+        if: steps.changed.outputs.changed == 'true'
+        id: version
+        run: |
+          VERSION="$(bash scripts/get-open-design-version.sh ./open-design.dmg)"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Upstream version: ${VERSION}"
+
+      - name: Create commit and optional tag when upstream changed
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          NEW_URL="${{ steps.changed.outputs.url }}"
+          NEW_VERSION="${{ steps.version.outputs.version }}"
+          LATEST_LOCAL_VERSION="${{ steps.latest_tag.outputs.version }}"
+          VERSION_CHANGED="false"
+          if [[ "${NEW_VERSION}" != "${LATEST_LOCAL_VERSION}" ]]; then
+            VERSION_CHANGED="true"
+          fi
+
+          if [[ "${VERSION_CHANGED}" == "true" && -z "${RELEASE_PAT}" ]]; then
+            echo "RELEASE_PAT secret is required to push version tags that trigger the release workflow." >&2
+            echo "Set Settings -> Secrets and variables -> Actions -> RELEASE_PAT with repo+workflow scopes." >&2
+            exit 1
+          fi
+
+          echo "${NEW_URL}" > upstream-asset-url.txt
+          if [[ "${VERSION_CHANGED}" == "true" ]]; then
+            echo "${NEW_VERSION}" > upstream-version.txt
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ -n "${RELEASE_PAT}" ]]; then
+            git config --local --unset-all http.https://github.com/.extraheader || true
+            git remote set-url origin "https://x-access-token:${RELEASE_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+
+          git add upstream-asset-url.txt
+          if [[ "${VERSION_CHANGED}" == "true" ]]; then
+            git add upstream-version.txt
+          fi
+
+          if ! git diff --cached --quiet; then
+            if [[ "${VERSION_CHANGED}" == "true" ]]; then
+              COMMIT_MSG="chore: bump upstream Open Design to ${NEW_VERSION}"
+            else
+              COMMIT_MSG="chore: update upstream Open Design DMG url"
+            fi
+            git commit -m "${COMMIT_MSG}"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          else
+            echo "Tracking files unchanged, skipping commit."
+          fi
+
+          if [[ "${VERSION_CHANGED}" == "true" ]]; then
+            NEW_TAG="v${NEW_VERSION}"
+            if git rev-parse "${NEW_TAG}" >/dev/null 2>&1; then
+              echo "Tag ${NEW_TAG} already exists. Nothing to do."
+              exit 0
+            fi
+            git tag "${NEW_TAG}"
+            git push origin "${NEW_TAG}"
+          else
+            echo "Upstream DMG changed but app version stayed at ${NEW_VERSION}; skipping tag."
+          fi
+
+      - name: No update
+        if: steps.changed.outputs.changed != 'true'
+        run: |
+          echo "Upstream DMG unchanged (${{ steps.changed.outputs.url }})"
