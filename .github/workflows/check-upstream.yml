@@ -44,51 +44,75 @@ jobs:
           TAG="${TAG#v}"
           echo "version=${TAG}" >> "${GITHUB_OUTPUT}"
 
-      - name: Resolve latest upstream DMG asset
+      - name: Resolve latest upstream version
         id: upstream
         run: |
           set -euo pipefail
-          # Find the latest open-design-vX.Y.Z release and its mac-x64 DMG.
+          # The upstream releases list is unreliable for version detection
+          # (some releases are unlisted, e.g. 0.11.0 exists as a downloadable
+          # asset but never appears in the releases API list). So we derive the
+          # latest version directly from the most recent open-design-v* git tag
+          # in the upstream repo via the lightweight tags API, which lists all
+          # tags regardless of release status.
           RESPONSE="$(curl -fsSL \
             -H 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/${UPSTREAM_REPO}/releases")"
+            "https://api.github.com/repos/${UPSTREAM_REPO}/tags?per_page=100")"
           LATEST_TAG="$(printf '%s' "${RESPONSE}" | jq -r '
-              [.[] | select(.tag_name | startswith("open-design-v"))]
-              | sort_by(.tag_name) | reverse | .[0].tag_name')"
+              [.[] | select(.name | startswith("open-design-v"))]
+              | sort_by(.name) | reverse | .[0].name // empty')"
           if [[ -z "${LATEST_TAG}" || "${LATEST_TAG}" == "null" ]]; then
-            echo "No open-design-v* release found upstream." >&2
+            echo "No open-design-v* tag found upstream." >&2
             exit 1
           fi
-          ASSET_URL="$(printf '%s' "${RESPONSE}" | jq -r --arg t "${LATEST_TAG}" '
-              [.[] | select(.tag_name == $t)][0]
-              | .assets[] | select(.name | test("mac-x64\\.dmg$")) | .browser_download_url')"
-          if [[ -z "${ASSET_URL}" || "${ASSET_URL}" == "null" ]]; then
-            echo "No mac-x64 DMG asset in ${LATEST_TAG}." >&2
-            exit 1
-          fi
+          LATEST_VERSION="${LATEST_TAG#open-design-v}"
+          echo "version=${LATEST_VERSION}" >> "${GITHUB_OUTPUT}"
+          # Derive the DMG URL deterministically from the version. This works
+          # for listed AND unlisted releases because the asset URL scheme is
+          # stable.
+          ASSET_URL="https://github.com/${UPSTREAM_REPO}/releases/download/open-design-v${LATEST_VERSION}/open-design-${LATEST_VERSION}-mac-x64.dmg"
           echo "asset_url=${ASSET_URL}" >> "${GITHUB_OUTPUT}"
-          echo "Latest upstream release: ${LATEST_TAG}"
-          echo "Asset: ${ASSET_URL}"
+          echo "Latest upstream tag: ${LATEST_TAG} (version ${LATEST_VERSION})"
+          echo "Derived DMG URL: ${ASSET_URL}"
 
-      - name: Check stored asset URL
+      - name: Compare with tracked version
         id: changed
         run: |
           set -euo pipefail
+          NEW_VERSION="${{ steps.upstream.outputs.version }}"
           STORED=""
-          [[ -f upstream-asset-url.txt ]] && STORED="$(tr -d '\r\n' < upstream-asset-url.txt)"
-          CURRENT="${{ steps.upstream.outputs.asset_url }}"
-          echo "url=${CURRENT}" >> "${GITHUB_OUTPUT}"
-          if [[ "${CURRENT}" == "${STORED}" ]]; then
-            echo "changed=false" >> "${GITHUB_OUTPUT}"
-            echo "Upstream DMG asset URL unchanged."
-          else
+          [[ -f upstream-version.txt ]] && STORED="$(tr -d '\r\n' < upstream-version.txt)"
+          # Only treat as "changed" when the upstream version is NEWER than what
+          # we last packaged. This avoids downgrading when the pinned version
+          # (e.g. 0.11.0) is higher than the latest API-visible release (0.9.0),
+          # which happens because some upstream releases are unlisted.
+          if [[ -z "${STORED}" ]]; then
+            # First run: package whatever upstream exposes.
             echo "changed=true" >> "${GITHUB_OUTPUT}"
-            echo "Upstream DMG changed: ${STORED} -> ${CURRENT}"
+            echo "No tracked version; packaging ${NEW_VERSION}."
+            exit 0
+          fi
+          newer="$(printf '%s\n%s\n' "${STORED}" "${NEW_VERSION}" | sort -V | tail -n1)"
+          if [[ "${STORED}" != "${NEW_VERSION}" && "${newer}" == "${NEW_VERSION}" ]]; then
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+            echo "Upstream version newer: ${STORED} -> ${NEW_VERSION}"
+          else
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            if [[ "${STORED}" == "${NEW_VERSION}" ]]; then
+              echo "Upstream version unchanged at ${NEW_VERSION}."
+            else
+              echo "Upstream version ${NEW_VERSION} is not newer than packaged ${STORED}; skipping (unlisted-release safe)."
+            fi
           fi
 
       - name: Download Open Design DMG
         if: steps.changed.outputs.changed == 'true'
-        run: curl -fL "${{ steps.upstream.outputs.url }}" -o open-design.dmg
+        run: curl -fL "${{ steps.upstream.outputs.asset_url }}" -o open-design.dmg
+
+      - name: Verify downloaded DMG
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          test -s open-design.dmg
+          file open-design.dmg
 
       - name: Read upstream Open Design version
         if: steps.changed.outputs.changed == 'true'
@@ -96,7 +120,7 @@ jobs:
         run: |
           VERSION="$(bash scripts/get-open-design-version.sh ./open-design.dmg)"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "Upstream version: ${VERSION}"
+          echo "Upstream version (from DMG): ${VERSION}"
 
       - name: Create commit and optional tag when upstream changed
         if: steps.changed.outputs.changed == 'true'
@@ -104,7 +128,7 @@ jobs:
           RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
         run: |
           set -euo pipefail
-          NEW_URL="${{ steps.changed.outputs.url }}"
+          NEW_URL="${{ steps.upstream.outputs.asset_url }}"
           NEW_VERSION="${{ steps.version.outputs.version }}"
           LATEST_LOCAL_VERSION="${{ steps.latest_tag.outputs.version }}"
           VERSION_CHANGED="false"
@@ -163,4 +187,4 @@ jobs:
       - name: No update
         if: steps.changed.outputs.changed != 'true'
         run: |
-          echo "Upstream DMG unchanged (${{ steps.changed.outputs.url }})"
+          echo "Upstream version unchanged (latest: ${{ steps.upstream.outputs.version }})"
