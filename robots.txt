@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://cuongducle.github.io/open-design-linux/sitemap.xml

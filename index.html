@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Install Open Design on Linux | APT Repository</title>
+  <meta name="description" content="Install Open Design on Ubuntu and Debian via APT repository. Native .deb and AppImage packages with Wayland support and one-line install." />
+  <meta name="keywords" content="Open Design, Linux, Ubuntu, Debian, APT, install, deb, AppImage, Wayland, design tool" />
+  <link rel="canonical" href="https://cuongducle.github.io/open-design-linux/" />
+  <meta property="og:title" content="Install Open Design on Linux" />
+  <meta property="og:description" content="Unofficial native .deb and AppImage packages for Open Design on Ubuntu, Debian, and any Linux distro." />
+  <meta property="og:url" content="https://cuongducle.github.io/open-design-linux/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Open Design for Linux" />
+  <style>body{font-family:-apple-system,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;line-height:1.6;color:#333}h1{border-bottom:2px solid #6366f1;padding-bottom:.5rem}a{color:#6366f1}pre{background:#f6f8fa;padding:1rem;border-radius:6px;overflow-x:auto}code{font-family:monospace;font-size:.9em}</style>
+</head>
+<body>
+  <h1>Open Design for Linux</h1>
+  <p>Unofficial native Linux packaging for <a href="https://github.com/cuongducle/open-design-linux">Open Design</a>. Install on Ubuntu, Debian, or any Linux distribution.</p>
+  <p><strong>Quick install:</strong></p>
+  <pre><code>curl -fsSL https://cuongducle.github.io/open-design-linux/install.sh | sudo bash</code></pre>
+  <p><strong>Or add the APT repository:</strong></p>
+  <pre><code>echo "deb [trusted=yes] https://github.com/cuongducle/open-design-linux/releases/latest/download/ ./" | sudo tee /etc/apt/sources.list.d/open-design.list
+sudo apt update
+sudo apt install open-design</code></pre>
+  <p style="margin-top:1rem"><strong>Note:</strong> This is an unofficial project. See the <a href="https://github.com/cuongducle/open-design-linux">GitHub repository</a> for source code, AppImage downloads, and documentation.</p>
+</body>
+</html>
