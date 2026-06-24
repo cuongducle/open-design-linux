@@ -197,10 +197,19 @@ exec "\${ELECTRON_BIN}" "\${extra_args[@]}" "$@"
 
     desktop = desktop.replace(/^Exec=.*$/gm, `Exec=${EXECUTABLE_NAME} %U`);
 
+    // StartupWMClass MUST match the X11/Wayland WM_CLASS the running app
+    // reports, otherwise GNOME/KDE docks cannot match the window to this
+    // desktop entry and "Pin to dash"/"Add to Favorites" stays unavailable.
+    // Electron sets WM_CLASS from app.name, which for our package is the
+    // `name` field (extraMetadata.name = open-design), NOT productName.
+    desktop = desktop.replace(
+      /^StartupWMClass=.*$/gm,
+      "StartupWMClass=open-design",
+    );
     if (!/^StartupWMClass=/m.test(desktop)) {
       desktop = desktop.replace(
         /(\n\[Desktop Action[^\]]*\]|$)/,
-        "StartupWMClass=Open Design\n$1",
+        "StartupWMClass=open-design\n$1",
       );
     }
     if (!/^MimeType=/m.test(desktop)) {

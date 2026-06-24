@@ -39,7 +39,9 @@ linux:
     Name: Open Design
     Comment: Open Design Desktop for Linux
     Categories: Graphics;Development;Utility;
-    StartupWMClass: Open Design
+    # Must match the WM_CLASS Electron reports (= app.name = extraMetadata.name)
+    # so GNOME/KDE docks can pin the running window to this desktop entry.
+    StartupWMClass: open-design
     MimeType: x-scheme-handler/od;
 deb:
   afterInstall: scripts/debian/postinst
