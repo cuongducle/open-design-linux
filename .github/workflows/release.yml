@@ -61,10 +61,31 @@ jobs:
         id: dmg
         run: |
           set -euo pipefail
-          # An explicit dmg_url input wins (used when the target release is
-          # unlisted upstream, e.g. 0.11.0). Otherwise autodetect the latest
-          # listed open-design-v* release's mac-x64 DMG via the releases API.
+          # Precedence for the DMG URL:
+          #   1. Explicit dmg_url workflow_dispatch input (pin any asset).
+          #   2. Tag-derived URL — when this run is triggered by a vX.Y.Z tag,
+          #      build the upstream asset URL directly from the version. This is
+          #      the only reliable path for releases that are unlisted upstream
+          #      (the releases API does not return them), e.g. 0.11.0.
+          #   3. API autodetect — fall back to the latest listed open-design-v*
+          #      release when there is no tag (manual dispatch without dmg_url).
           ASSET_URL="${{ github.event.inputs.dmg_url }}"
+
+          if [[ -z "${ASSET_URL}" ]]; then
+            # Resolve the version we are building for. On a tag push it is the
+            # tag name (without the leading v); on workflow_dispatch it is the
+            # inputs.tag value; otherwise fall back to the tracked file.
+            BUILD_TAG="${{ github.event.inputs.tag }}"
+            if [[ -z "${BUILD_TAG}" ]]; then
+              BUILD_TAG="${GITHUB_REF_NAME:-}"
+            fi
+            BUILD_VERSION="${BUILD_TAG#v}"
+            if [[ -n "${BUILD_VERSION}" && "${BUILD_VERSION}" != "${BUILD_TAG}" ]]; then
+              ASSET_URL="https://github.com/${UPSTREAM_REPO}/releases/download/open-design-v${BUILD_VERSION}/open-design-${BUILD_VERSION}-mac-x64.dmg"
+              echo "Derived DMG URL from version ${BUILD_VERSION}: ${ASSET_URL}"
+            fi
+          fi
+
           if [[ -z "${ASSET_URL}" ]]; then
             ASSET_URL="$(
               curl -fsSL \
@@ -75,7 +96,9 @@ jobs:
                   | sort_by(.tag_name) | reverse | .[0]
                   | .assets[] | select(.name | test("mac-x64\\.dmg$")) | .browser_download_url'
             )"
+            echo "Autodetected DMG URL from latest listed release: ${ASSET_URL}"
           fi
+
           if [[ -z "${ASSET_URL}" || "${ASSET_URL}" == "null" ]]; then
             echo "Could not resolve a mac-x64 DMG asset from ${UPSTREAM_REPO} releases." >&2
             exit 1
