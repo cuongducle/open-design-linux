@@ -225,6 +225,19 @@ exec "\${ELECTRON_BIN}" "\${extra_args[@]}" "$@"
     );
 
     fs.writeFileSync(desktopFile, desktop);
+
+    // GNOME on Wayland matches a running window to its .desktop entry by
+    // deriving a desktop filename from the WM_CLASS: it lowercases the class
+    // and replaces spaces with dashes, then looks for that file. Our WM_CLASS
+    // is "Open Design", so GNOME looks for "Open-design.desktop" — NOT the
+    // "open-design.desktop" electron-builder emits from executableName.
+    // Without the correctly-named file, GNOME shows a generic icon and never
+    // offers "Add to Favorites" for the running window. Write a second copy
+    // under the GNOME-expected name (keep the original for other DEs / X11).
+    if (desktopFilename === `${EXECUTABLE_NAME}.desktop`) {
+      const gnomeName = "Open-design.desktop";
+      fs.copyFileSync(desktopFile, path.join(appOutDir, gnomeName));
+    }
   }
 
   // Drop macOS-only Mach-O artifacts that 7z carried over from the DMG. These
