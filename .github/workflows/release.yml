@@ -127,6 +127,11 @@ jobs:
           file "${NODE_BIN}" | grep -E "ELF"
 
       - name: Build DEB and AppImage
+        env:
+          # GitHub Actions runners use an overlay filesystem where cross-layer
+          # hardlinks fail with EEXIST. electron-builder hardlinks node_modules
+          # entries while packing; disabling hardlinks forces plain file copies.
+          USE_HARD_LINKS: "false"
         run: |
           npx electron-builder \
             --config electron-builder.yml \
