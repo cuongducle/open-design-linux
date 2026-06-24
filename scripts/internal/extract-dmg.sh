@@ -67,22 +67,62 @@ extract_archive() {
   return "${rc}"
 }
 
-# Prefer the vendored/pinned 7zz (16+). The old p7zip 16.02 that ships on
-# Ubuntu 22.04/24.04 as `7z` CANNOT read modern UDZO DMG layout, so we explicitly
-# rank `7zz` (the official 7-Zip for Linux binary, >=23) above any `7z` on PATH.
-if [[ -x "${ROOT_DIR}/tools/7zz" ]]; then
-  SEVEN_Z_BIN="${ROOT_DIR}/tools/7zz"
-elif command -v 7zz >/dev/null 2>&1; then
-  SEVEN_Z_BIN="$(command -v 7zz)"
-elif [[ -d "${ROOT_DIR}/node_modules" ]]; then
-  # 7zip-bin ships a recent 7za (>=16); rank it above system 7z (p7zip 16.02).
-  SEVEN_Z_BIN="$(node -e "console.log(require('7zip-bin').path7za)")"
-elif command -v 7z >/dev/null 2>&1; then
-  SEVEN_Z_BIN="$(command -v 7z)"
-else
-  echo "No 7z binary found. Install 7-Zip for Linux (>=23, the '7zz' binary)" >&2
-  echo "or place a binary at tools/7zz. The legacy p7zip 16.02 '7z' cannot" >&2
-  echo "read the modern UDZO DMG layout Open Design ships." >&2
+# Resolve a 7-Zip binary that can actually read modern UDZO DMG layout.
+# CRITICAL: p7zip 16.02 (shipped as `7za` via the npm `7zip-bin` package, and as
+# `7z`/`7za` on older Ubuntu via p7zip-full) CANNOT read the UDZO DMG format
+# Open Design ships — it exits "Can not open the file as archive". Only the
+# official 7-Zip for Linux (>=23) works. Note: the Ubuntu 24.04 `7zip` package
+# installs version 23.01 but exposes it as `7z`/`7za`/`7zr` WRAPPERS (38-byte
+# shell scripts), NOT `7zz`. So we must test capability by version string, not
+# by binary name.
+#
+# Candidate binaries in order, then we keep the first one whose banner reports
+# 7-Zip >=23 (rejecting anything that says "p7zip Version 16").
+CANDIDATES=()
+[[ -x "${ROOT_DIR}/tools/7zz" ]] && CANDIDATES+=("${ROOT_DIR}/tools/7zz")
+command -v 7zz >/dev/null 2>&1 && CANDIDATES+=("7zz")
+command -v 7z  >/dev/null 2>&1 && CANDIDATES+=("7z")
+command -v 7za >/dev/null 2>&1 && CANDIDATES+=("7za")
+if [[ -d "${ROOT_DIR}/node_modules" ]]; then
+  NODE_7ZA="$(node -e "try{console.log(require('7zip-bin').path7za)}catch(e){}" 2>/dev/null || true)"
+  [[ -n "${NODE_7ZA}" ]] && CANDIDATES+=("${NODE_7ZA}")
+fi
+
+SEVEN_Z_BIN=""
+for candidate in "${CANDIDATES[@]}"; do
+  banner="$("${candidate}" 2>&1 | head -2 | tail -1 || true)"
+  # Reject p7zip 16.02 outright — it cannot read UDZO DMGs.
+  if printf '%s' "${banner}" | grep -qi "p7zip Version 16"; then
+    echo "  skipping ${candidate}: p7zip 16.02 (cannot read UDZO DMG)" >&2
+    continue
+  fi
+  # Accept 7-Zip for Linux (>=23) whose banner is "7-Zip (z) NN.MM ...".
+  if printf '%s' "${banner}" | grep -qiE "7-Zip \(z\) [0-9]+"; then
+    SEVEN_Z_BIN="${candidate}"
+    echo "  selected ${candidate}: ${banner}"
+    break
+  fi
+  # Some builds print "7-Zip [64] NN.MM" without the (z). Accept those too as
+  # long as the version is >=23.
+  ver="$(printf '%s' "${banner}" | grep -oE "[0-9]+\.[0-9]+" | head -1 || true)"
+  if [[ -n "${ver}" ]] && [[ "${ver%%.*}" -ge 23 ]]; then
+    SEVEN_Z_BIN="${candidate}"
+    echo "  selected ${candidate}: ${banner}"
+    break
+  fi
+done
+
+if [[ -z "${SEVEN_Z_BIN}" ]]; then
+  cat >&2 <<'ERR'
+No capable 7-Zip binary found. The legacy p7zip 16.02 (`7z`/`7za`/`7zip-bin`)
+cannot read the modern UDZO DMG layout Open Design ships. Install 7-Zip for
+Linux >=23:
+
+  Debian/Ubuntu 24.04+:  sudo apt install 7zip   (provides /usr/bin/7z wrapper)
+  Other distros:         download from https://github.com/ip7z/7zip/releases
+                          and place the binary at tools/7zz
+
+ERR
   exit 1
 fi
 SEVEN_Z_BIN="$(prepare_7z_bin "${SEVEN_Z_BIN}")"

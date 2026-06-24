@@ -35,21 +35,31 @@ prepare_7z_bin() {
   fi
 }
 
-# Same precedence logic as extract-dmg.sh: the legacy p7zip 16.02 '7z' cannot
-# read modern UDZO DMG layout, so prefer 7zz / 7zip-bin over system 7z.
-if [[ -x "${ROOT_DIR}/tools/7zz" ]]; then
-  SEVEN_Z_BIN="${ROOT_DIR}/tools/7zz"
-elif command -v 7zz >/dev/null 2>&1; then
-  SEVEN_Z_BIN="$(command -v 7zz)"
-elif [[ -d "${ROOT_DIR}/node_modules" ]]; then
-  SEVEN_Z_BIN="$(node -e "console.log(require('7zip-bin').path7za)")"
-elif command -v 7z >/dev/null 2>&1; then
-  SEVEN_Z_BIN="$(command -v 7z)"
-else
-  echo "No 7z binary found. Install 7zip or run npm install first." >&2
+# Resolve a capable 7-Zip (>=23) by version string, not by name. The Ubuntu
+# 24.04 `7zip` package installs 7-Zip 23.01 but exposes it as `7z`/`7za`/`7zr`
+# wrappers, NOT `7zz`; and the npm `7zip-bin` ships p7zip 16.02 which cannot
+# read UDZO DMGs. See extract-dmg.sh for the full rationale.
+CANDIDATES=()
+[[ -x "${ROOT_DIR}/tools/7zz" ]] && CANDIDATES+=("${ROOT_DIR}/tools/7zz")
+command -v 7zz >/dev/null 2>&1 && CANDIDATES+=("7zz")
+command -v 7z  >/dev/null 2>&1 && CANDIDATES+=("7z")
+command -v 7za >/dev/null 2>&1 && CANDIDATES+=("7za")
+if [[ -d "${ROOT_DIR}/node_modules" ]]; then
+  NODE_7ZA="$(node -e "try{console.log(require('7zip-bin').path7za)}catch(e){}" 2>/dev/null || true)"
+  [[ -n "${NODE_7ZA}" ]] && CANDIDATES+=("${NODE_7ZA}")
+fi
+SEVEN_Z_BIN=""
+for candidate in "${CANDIDATES[@]}"; do
+  banner="$("${candidate}" 2>&1 | head -2 | tail -1 || true)"
+  if printf '%s' "${banner}" | grep -qi "p7zip Version 16"; then continue; fi
+  if printf '%s' "${banner}" | grep -qiE "7-Zip \(z\) [0-9]+"; then SEVEN_Z_BIN="${candidate}"; break; fi
+  ver="$(printf '%s' "${banner}" | grep -oE "[0-9]+\.[0-9]+" | head -1 || true)"
+  if [[ -n "${ver}" ]] && [[ "${ver%%.*}" -ge 23 ]]; then SEVEN_Z_BIN="${candidate}"; break; fi
+done
+if [[ -z "${SEVEN_Z_BIN}" ]]; then
+  echo "No capable 7-Zip (>=23) found. Install the '7zip' apt package or place tools/7zz." >&2
   exit 1
 fi
-SEVEN_Z_BIN="$(prepare_7z_bin "${SEVEN_Z_BIN}")"
 
 rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
