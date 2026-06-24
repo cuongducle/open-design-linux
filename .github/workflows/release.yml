@@ -87,16 +87,22 @@ jobs:
           fi
 
           if [[ -z "${ASSET_URL}" ]]; then
-            ASSET_URL="$(
+            # Fallback when there is no tag: autodetect the newest listed
+            # release's mac-x64 DMG. Numeric version sort (string sort would
+            # wrongly put 0.9.0 above 0.11.0 because "9" > "1").
+            LATEST_VERSION="$(
               curl -fsSL \
                 -H 'Accept: application/vnd.github+json' \
-                "https://api.github.com/repos/${UPSTREAM_REPO}/releases?per_page=100" \
+                "https://api.github.com/repos/${UPSTREAM_REPO}/tags?per_page=100" \
               | jq -r '
-                  [.[] | select(.tag_name | startswith("open-design-v"))]
-                  | sort_by(.tag_name) | reverse | .[0]
-                  | .assets[] | select(.name | test("mac-x64\\.dmg$")) | .browser_download_url'
+                  [.[] | select(.name | startswith("open-design-v")) | .name]
+                  | map({name: ., v: (ltrimstr("open-design-v") | split(".") | map(tonumber))})
+                  | sort_by(.v) | reverse | .[0].v | join(".")'
             )"
-            echo "Autodetected DMG URL from latest listed release: ${ASSET_URL}"
+            if [[ -n "${LATEST_VERSION}" && "${LATEST_VERSION}" != "null" ]]; then
+              ASSET_URL="https://github.com/${UPSTREAM_REPO}/releases/download/open-design-v${LATEST_VERSION}/open-design-${LATEST_VERSION}-mac-x64.dmg"
+            fi
+            echo "Autodetected DMG URL from latest tag ${LATEST_VERSION}: ${ASSET_URL}"
           fi
 
           if [[ -z "${ASSET_URL}" || "${ASSET_URL}" == "null" ]]; then

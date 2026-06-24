@@ -57,9 +57,14 @@ jobs:
           RESPONSE="$(curl -fsSL \
             -H 'Accept: application/vnd.github+json' \
             "https://api.github.com/repos/${UPSTREAM_REPO}/tags?per_page=100")"
+          # Numeric version sort, NOT string sort: "v0.9.0" > "v0.11.0" as
+          # strings (because "9" > "1" at the first differing char), which
+          # would wrongly pick 0.9.0 as newest. Split each version into its
+          # numeric parts and sort by the array so 0.11.0 wins.
           LATEST_TAG="$(printf '%s' "${RESPONSE}" | jq -r '
-              [.[] | select(.name | startswith("open-design-v"))]
-              | sort_by(.name) | reverse | .[0].name // empty')"
+              [.[] | select(.name | startswith("open-design-v")) | .name]
+              | map({name: ., v: (ltrimstr("open-design-v") | split(".") | map(tonumber))})
+              | sort_by(.v) | reverse | .[0].name // empty')"
           if [[ -z "${LATEST_TAG}" || "${LATEST_TAG}" == "null" ]]; then
             echo "No open-design-v* tag found upstream." >&2
             exit 1
