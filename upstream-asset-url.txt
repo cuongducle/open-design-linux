@@ -1,1 +1,1 @@
-https://github.com/nexu-io/open-design/releases/download/open-design-v0.22.1/open-design-0.22.1-mac-x64.dmg
+https://github.com/nexu-io/open-design/releases/download/open-design-v0.22.2/open-design-0.22.2-mac-x64.dmg
