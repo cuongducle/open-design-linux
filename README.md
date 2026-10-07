@@ -94,6 +94,32 @@ bash scripts/setup.sh ./open-design.dmg
 
 ---
 
+## Headless daemon CLI
+
+The `.deb` exposes the bundled daemon CLI on your PATH as `open-design`
+(a symlink to `/opt/Open Design/open-design-cli`). It runs headless through
+Electron's Node runtime, so MCP sessions keep working after you close the GUI:
+
+```bash
+open-design --help        # daemon CLI, no window
+```
+
+The name is `open-design` rather than `od` on purpose: `/usr/bin/od` is GNU
+coreutils' octal dump and would collide.
+
+### Run the daemon as a systemd user service
+
+```bash
+systemctl --user enable --now open-design
+systemctl --user status open-design
+```
+
+The `.deb` ships `/usr/lib/systemd/user/open-design.service`
+(`Restart=on-failure`); it simply runs the headless CLI above. Disable with
+`systemctl --user disable --now open-design`.
+
+---
+
 ## Diagnostics
 
 ```bash
@@ -139,7 +165,8 @@ To enable auto-tagging you must add a `RELEASE_PAT` secret (a personal access to
 │   ├── debian/{postinst,postrm,changelog}
 │   └── internal/
 │       ├── extract-dmg.sh        # DMG -> app_asar/ (+ pnpm symlink repair)
-│       └── build-native.sh       # better-sqlite3 rebuild for Electron ABI
+│       ├── build-native.sh       # better-sqlite3 rebuild for Electron ABI
+│       └── fix-linux-binaries.sh # Linux ffmpeg + vela into the payload
 ├── assets/icons/linux/           # 16..512 px icons
 ├── .github/workflows/            # release.yml + check-upstream.yml
 └── upstream-{version,asset-url}.txt
@@ -151,7 +178,7 @@ To enable auto-tagging you must add a `RELEASE_PAT` secret (a personal access to
 
 - **x86-64 only.** The upstream DMG is `mac-x64`; no arm64 build is produced. Apple-Silicon Open Design releases would need an arm64 macOS DMG source.
 - **Auto-update is not wired.** The `.deb` does not self-update; the APT repository is the update channel.
-- **`vela` CLI is macOS-only.** The bundled `open-design/bin/vela` Mach-O binary is stripped during packaging; any feature that shells out to it will not work on Linux until upstream ships a Linux build.
+- **`vela` CLI is a Linux build.** The macOS Mach-O `open-design/bin/vela` is replaced at packaging time with a Linux x86-64 binary (`@powerformer/vela-cli-linux-x64`), and the launcher exports `VELA_BIN` pointing at it, so the sign-in gate works. Override with your own `VELA_BIN` if needed.
 
 ---
 
