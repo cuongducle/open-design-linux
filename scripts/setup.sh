@@ -42,29 +42,32 @@ if [[ ! -f "${DMG_PATH}" ]]; then
   exit 1
 fi
 
-echo "[1/5] Installing npm dependencies..."
+echo "[1/6] Installing npm dependencies..."
 ( cd "${ROOT_DIR}" && npm install --include=dev )
 
-echo "[2/5] Extracting app payload from DMG..."
+echo "[2/6] Extracting app payload from DMG..."
 bash "${ROOT_DIR}/scripts/internal/extract-dmg.sh" "${DMG_PATH}"
 
-echo "[3/5] Rebuilding native modules for Linux..."
+echo "[3/6] Rebuilding native modules for Linux..."
 bash "${ROOT_DIR}/scripts/internal/build-native.sh"
 
-echo "[4/5] Running smoke check..."
+echo "[4/6] Installing Linux helper binaries (ffmpeg, vela)..."
+bash "${ROOT_DIR}/scripts/internal/fix-linux-binaries.sh"
+
+echo "[5/6] Running smoke check..."
 ELECTRON_BIN="${ROOT_DIR}/node_modules/.bin/electron"
 if [[ -x "${ELECTRON_BIN}" ]]; then
   "${ELECTRON_BIN}" --version >/dev/null || true
 fi
 
 if [[ "${SKIP_APP_INSTALL}" == "1" ]]; then
-  echo "[5/5] Skipped local launcher install (SKIP_APP_INSTALL=1)."
+  echo "[6/6] Skipped local launcher install (SKIP_APP_INSTALL=1)."
   echo
   echo "Payload ready for packaging in: ${ROOT_DIR}/app_asar"
   exit 0
 fi
 
-echo "[5/5] Installing local launcher..."
+echo "[6/6] Installing local launcher..."
 mkdir -p "${HOME}/.local/bin"
 cat > "${HOME}/.local/bin/open-design" <<EOF
 #!/usr/bin/env bash
