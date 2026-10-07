@@ -11,6 +11,17 @@ if [ "$1" = "purge" ]; then
     rm -f /etc/apparmor.d/open-design
 fi
 
+# Remove the headless CLI symlink and systemd user unit (issue #2).
+# Only remove the symlink if it points at our wrapper (don't clobber a
+# user-owned /usr/local/bin/open-design).
+if [ -L /usr/local/bin/open-design ]; then
+    target="$(readlink /usr/local/bin/open-design || true)"
+    case "$target" in
+        *open-design-cli) rm -f /usr/local/bin/open-design ;;
+    esac
+fi
+rm -f /usr/lib/systemd/user/open-design.service
+
 # Update desktop database (idempotent)
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database /usr/share/applications || true
