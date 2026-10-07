@@ -32,8 +32,7 @@ fi
 # Generate AppArmor profile if apparmor_parser is available. Open Design spawns
 # child processes (daemon, web sidecar, agent CLIs) so the profile must allow
 # userns + broad config writes under ~/.config/Open Design.
-if command -v apparmor_parser >/dev/null 2>&1 && [ -n "$INSTALL_PREFIX" ]; then
-    PROFILE_PATH="/etc/apparmor.d/open-design"
+if command -v apparmor_parser >/dev/null 2>&1 && [ -n "$INSTALL_PREFIX" ]; then    PROFILE_PATH="/etc/apparmor.d/open-design"
     BIN_PATH="$INSTALL_PREFIX/open-design.bin"
 
     if [ ! -f "$PROFILE_PATH" ]; then
@@ -58,4 +57,39 @@ if command -v apparmor_parser >/dev/null 2>&1 && [ -n "$INSTALL_PREFIX" ]; then
     fi
 
     apparmor_parser -r "$PROFILE_PATH" || true
+fi
+
+# --- Headless daemon CLI (issue #2) ---
+# after-pack.js ships an `open-design-cli` wrapper next to the GUI launcher.
+# Expose it on PATH as /usr/local/bin/open-design (NOT `od`: /usr/bin/od is
+# GNU coreutils' octal dump and would collide). /usr/local/bin is used instead
+# of /usr/bin to avoid dpkg file conflicts; it is on the default PATH.
+if [ -n "$INSTALL_PREFIX" ] && [ -x "$INSTALL_PREFIX/open-design-cli" ]; then
+    ln -sf "$INSTALL_PREFIX/open-design-cli" /usr/local/bin/open-design
+fi
+
+# --- systemd user service (issue #2) ---
+# Ships the unit file; users opt in with:
+#   systemctl --user enable --now open-design
+# (postinst runs as root and cannot enable user units on anyone's behalf.)
+UNIT_DIR="/usr/lib/systemd/user"
+UNIT_FILE="$UNIT_DIR/open-design.service"
+if [ -n "$INSTALL_PREFIX" ] && [ -x "$INSTALL_PREFIX/open-design-cli" ]; then
+    mkdir -p "$UNIT_DIR"
+    cat > "$UNIT_FILE" <<UNIT_EOF
+[Unit]
+Description=Open Design headless daemon (MCP)
+Documentation=https://github.com/cuongducle/open-design-linux
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/open-design
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT_EOF
+    chmod 644 "$UNIT_FILE"
 fi
