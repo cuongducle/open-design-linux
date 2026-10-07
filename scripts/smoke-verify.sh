@@ -55,7 +55,7 @@ tail -120 "${LOG_FILE}" || true
 
 # Fatal bootstrap errors we never want to see.
 if grep -Eiq \
-  'Cannot find module|ERR_MODULE_NOT_FOUND|ENOENT|EACCES|Trace/breakpoint trap|Segmentation fault|better_sqlite3\.node was compiled against a different Node|was compiled against a different Node' \
+  'Cannot find module|ERR_MODULE_NOT_FOUND|ENOENT|EACCES|Trace/breakpoint trap|Segmentation fault|better_sqlite3\.node was compiled against a different Node|was compiled against a different Node|Could not find ffmpeg executable|vela binary not found' \
   "${LOG_FILE}"; then
   fail "smoke log contains bootstrap/crash error"
 fi
