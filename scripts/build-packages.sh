@@ -90,6 +90,27 @@ if [[ ! -f "${APP_DIR}/.linux-native-rebuilt" ]]; then
   touch "${APP_DIR}/.linux-native-rebuilt"
 fi
 
+# Install Linux helper binaries (ffmpeg, vela) if missing (issues #1, #3).
+bash "${ROOT_DIR}/scripts/internal/fix-linux-binaries.sh"
+
+# Verify the platform binaries are present and are Linux ELF executables.
+# These are hard failures: shipping without them reproduces issues #1/#3.
+FFMPEG_BIN="${APP_DIR}/node_modules/@ffmpeg-installer/linux-x64/ffmpeg"
+VELA_BIN="${ROOT_DIR}/app_asar/open-design/bin/vela"
+for bin in "${FFMPEG_BIN}" "${VELA_BIN}"; do
+  if [[ ! -x "${bin}" ]]; then
+    echo "Missing Linux binary: ${bin}" >&2
+    echo "Run scripts/internal/fix-linux-binaries.sh." >&2
+    exit 1
+  fi
+  if ! file "${bin}" | grep -q "ELF"; then
+    echo "Binary ${bin} is not a Linux ELF executable." >&2
+    file "${bin}" >&2
+    exit 1
+  fi
+done
+echo "Platform binaries verified (ffmpeg, vela)."
+
 echo "Building target: ${TARGET}"
 (
   cd "${ROOT_DIR}"
