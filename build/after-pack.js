@@ -64,6 +64,14 @@ cleanup_singleton_lock() {
   fi
 }
 
+# --- vela CLI (issue #1) ---
+# Sign-in shells out to vela. We ship a Linux build at
+# resources/open-design/bin/vela (installed by fix-linux-binaries.sh);
+# point the app at it unless the user overrode VELA_BIN already.
+if [[ -z "\${VELA_BIN:-}" && -x "\${APP_DIR}/resources/open-design/bin/vela" ]]; then
+  export VELA_BIN="\${APP_DIR}/resources/open-design/bin/vela"
+fi
+
 # --- Doctor diagnostic ---
 run_doctor() {
   echo "=== Open Design Desktop Doctor Report ==="
@@ -186,6 +194,37 @@ exec "\${ELECTRON_BIN}" "\${extra_args[@]}" "$@"
 
   fs.writeFileSync(executablePath, wrapper, { mode: 0o755 });
   fs.chmodSync(binaryPath, 0o755);
+
+  // Headless daemon CLI wrapper (issue #2). Ships as `open-design-cli` next to
+  // the GUI launcher in both .deb (/opt/Open Design/open-design-cli) and
+  // AppImage. Runs the bundled daemon CLI through Electron's Node runtime
+  // without opening a window, so MCP sessions survive GUI close. The .deb
+  // postinst symlinks /usr/local/bin/open-design -> this wrapper (named
+  // open-design instead of `od` to avoid colliding with GNU coreutils od).
+  const cliWrapperPath = path.join(appOutDir, `${EXECUTABLE_NAME}-cli`);
+  const cliWrapper = `#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="$(cd "$(dirname "$(readlink -f "\${BASH_SOURCE[0]}")")" && pwd)"
+ELECTRON_BIN="\${APP_DIR}/${EXECUTABLE_NAME}.bin"
+DAEMON_CLI="\${APP_DIR}/resources/app/prebundled/daemon/daemon-cli.mjs"
+
+if [[ ! -x "\${ELECTRON_BIN}" ]]; then
+  echo "open-design-cli: Electron runtime not found: \${ELECTRON_BIN}" >&2
+  exit 1
+fi
+if [[ ! -f "\${DAEMON_CLI}" ]]; then
+  echo "open-design-cli: bundled daemon CLI not found: \${DAEMON_CLI}" >&2
+  echo "This payload predates the daemon CLI entrypoint; update the package." >&2
+  exit 1
+fi
+
+export ELECTRON_FORCE_IS_PACKAGED="\${ELECTRON_FORCE_IS_PACKAGED:-1}"
+export NODE_ENV="\${NODE_ENV:-production}"
+
+exec env ELECTRON_RUN_AS_NODE=1 "\${ELECTRON_BIN}" "\${DAEMON_CLI}" "$@"
+`;
+  fs.writeFileSync(cliWrapperPath, cliWrapper, { mode: 0o755 });
 
   // Patch the .desktop entry(ies) electron-builder emitted.
   const desktopFiles = fs
